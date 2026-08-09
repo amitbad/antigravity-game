@@ -13,6 +13,15 @@ interface Player {
   draws: number;
 }
 
+// interface GameRecord {
+//   id: string;
+//   winnerId: string | null;
+//   playerIds: string[];
+//   isDraw: boolean;
+//   boardSize: number;
+//   winCondition: number;
+//   date: string;
+// }
 const PRESET_EMOJIS = ['❌', '⭕', '🚀', '🦄', '⭐', '🔥', '🎮', '🍕', '🦊', '⚡', '👑', '🍀'];
 const PRESET_COLORS = ['#ff4b4b', '#4b7bff', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#06b6d4', '#14b8a6'];
 
@@ -23,6 +32,8 @@ export default function App() {
   // Backend States
   const [allPlayers, setAllPlayers] = useState<Player[]>([]);
   const [leaderboard, setLeaderboard] = useState<Player[]>([]);
+  // const [games, setGames] = useState<GameRecord[]>([]);
+  // const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // New Player Form State
@@ -81,8 +92,17 @@ export default function App() {
   const [isDraw, setIsDraw] = useState(false);
   const [gameSaved, setGameSaved] = useState(false);
 
+  // Local History and Replay State
+  const [moves, setMoves] = useState<number[]>([]);
+  const [localHistory, setLocalHistory] = useState<any[]>([]);
+  const [activeReplayGame, setActiveReplayGame] = useState<any | null>(null);
+  const [replayStep, setReplayStep] = useState<number>(-1);
+  const [isPlayingReplay, setIsPlayingReplay] = useState<boolean>(false);
+  const [showHistorySidebar, setShowHistorySidebar] = useState<boolean>(true);
+
   // Load Initial Server Data
   const fetchData = async () => {
+    // setLoading(true);
     setError(null);
     try {
       // Try to load from server. Fallback to local memory if server is down.
@@ -119,18 +139,52 @@ export default function App() {
     } catch (err) {
       console.error(err);
       setError('An unexpected error occurred while loading server data.');
+    } finally {
+      // setLoading(false);
+    }
     }
   };
 
   useEffect(() => {
     fetchData();
+    // Load local history
+    const saved = localStorage.getItem('tictactoe_history');
+    if (saved) {
+      try {
+        setLocalHistory(JSON.parse(saved));
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Replay Autoplay handler
+  useEffect(() => {
+    let intervalId: any;
+    if (isPlayingReplay && activeReplayGame) {
+      intervalId = setInterval(() => {
+        setReplayStep(prev => {
+          if (prev < activeReplayGame.moves.length - 1) {
+            return prev + 1;
+          } else {
+            setIsPlayingReplay(false);
+            return prev;
+          }
+        });
+      }, 1000);
+    }
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [isPlayingReplay, activeReplayGame]);
 
   // Update Win Condition Max when Board Size changes
   useEffect(() => {
     if (winCondition > boardSize) {
       setWinCondition(boardSize);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boardSize]);
 
   // Handle Add Player API
@@ -209,6 +263,7 @@ export default function App() {
     setWinningCells([]);
     setIsDraw(false);
     setGameSaved(false);
+    setMoves([]);
     setView('game');
   };
 
@@ -299,17 +354,20 @@ export default function App() {
     newBoard[index] = currentPlayer.symbol;
     setBoard(newBoard);
 
+    const newMoves = [...moves, index];
+    setMoves(newMoves);
+
     // Check Win
     if (checkWinner(newBoard, boardSize, winCondition)) {
       setWinner(currentPlayer);
-      saveGameResult(currentPlayer.id, false);
+      saveGameResult(currentPlayer.id, false, newMoves);
       return;
     }
 
     // Check Draw
     if (newBoard.every(cell => cell !== null)) {
       setIsDraw(true);
-      saveGameResult(null, true);
+      saveGameResult(null, true, newMoves);
       return;
     }
 
@@ -317,8 +375,8 @@ export default function App() {
     setTurnIndex((turnIndex + 1) % activePlayers.length);
   };
 
-  // Save game result to Express API
-  const saveGameResult = async (winnerId: string | null, draw: boolean) => {
+  // Save game result to Express API and LocalStorage
+  const saveGameResult = async (winnerId: string | null, draw: boolean, finalMoves = moves) => {
     if (gameSaved) return;
     setGameSaved(true);
 
@@ -345,6 +403,23 @@ export default function App() {
         return updated;
       });
     }
+
+    // Save to LocalStorage
+    const gameRecord = {
+      id: Date.now().toString(),
+      winnerId,
+      playerIds,
+      isDraw: draw,
+      boardSize,
+      winCondition,
+      date: new Date().toISOString(),
+      players: activePlayers,
+      moves: finalMoves
+    };
+
+    const updatedHistory = [gameRecord, ...localHistory];
+    setLocalHistory(updatedHistory);
+    localStorage.setItem('tictactoe_history', JSON.stringify(updatedHistory));
 
     try {
       const response = await fetch(`${API_URL}/games`, {
@@ -390,6 +465,50 @@ export default function App() {
     }
   };
 
+  // Replay helpers
+  const handleStartReplay = (game: any) => {
+    setActiveReplayGame(game);
+    setReplayStep(-1); // Start with empty board
+    setIsPlayingReplay(false);
+  };
+
+  const getReplayBoardState = () => {
+    if (!activeReplayGame) return [];
+    const size = activeReplayGame.boardSize;
+    const grid = Array(size * size).fill(null);
+    const { moves, players } = activeReplayGame;
+
+    for (let i = 0; i <= replayStep; i++) {
+      const moveIndex = moves[i];
+      const playerIndex = i % players.length;
+      grid[moveIndex] = players[playerIndex].symbol;
+    }
+    return grid;
+  };
+
+  const getReplayStepDescription = () => {
+    if (!activeReplayGame) return '';
+    if (replayStep === -1) return 'Game Start - Empty Board';
+
+    const { moves, players, boardSize } = activeReplayGame;
+    const moveIndex = moves[replayStep];
+    const playerIndex = replayStep % players.length;
+    const player = players[playerIndex];
+    
+    const row = Math.floor(moveIndex / boardSize) + 1;
+    const col = (moveIndex % boardSize) + 1;
+
+    return `${player.name} (${player.symbol}) played cell at row ${row}, col ${col}`;
+  };
+
+  const clearHistory = () => {
+    if (window.confirm('Are you sure you want to clear your local game history?')) {
+      localStorage.removeItem('tictactoe_history');
+      setLocalHistory([]);
+    }
+  };
+
+>>>>>>> add_game_history_sidebar
   return (
     <div className="fade-in">
       <header style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
@@ -399,6 +518,15 @@ export default function App() {
         <p style={{ color: 'rgba(255,255,255,0.6)', margin: 0 }}>
           Local multi-player game configuration using Express & React
         </p>
+        <div style={{ marginTop: '1.2rem', display: 'flex', gap: '1rem', justifyContent: 'center' }}>
+          <button 
+            className="btn btn-secondary animate-hover" 
+            onClick={() => setShowHistorySidebar(true)}
+            style={{ fontSize: '0.9rem', padding: '0.6rem 1.2rem' }}
+          >
+            🕒 Match History ({localHistory.length})
+          </button>
+        </div>
         {error && (
           <div style={{
             background: 'rgba(239,68,68,0.1)',
@@ -830,6 +958,230 @@ export default function App() {
                 </button>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* History Sidebar */}
+      {showHistorySidebar && (
+        <div className="sidebar-backdrop" onClick={() => setShowHistorySidebar(false)} />
+      )}
+      <div className={`history-sidebar ${showHistorySidebar ? 'open' : ''}`}>
+        <div className="history-header">
+          <h3 style={{ margin: 0, fontSize: '1.3rem', fontWeight: 700 }}>🕒 Game History</h3>
+          <button 
+            className="replay-btn" 
+            onClick={() => setShowHistorySidebar(false)}
+            style={{ width: '32px', height: '32px', border: 'none', background: 'transparent', fontSize: '1.2rem', padding: 0 }}
+          >
+            ✕
+          </button>
+        </div>
+        <div className="history-list">
+          {localHistory.length === 0 ? (
+            <div style={{ textAlign: 'center', color: 'rgba(255,255,255,0.5)', marginTop: '2rem' }}>
+              No matches played yet.
+            </div>
+          ) : (
+            localHistory.map((hGame) => {
+              const formattedDate = new Date(hGame.date).toLocaleDateString(undefined, {
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+              });
+              const winnerDetails = hGame.winnerId 
+                ? hGame.players.find((p: any) => p.id === hGame.winnerId)
+                : null;
+
+              return (
+                <div key={hGame.id} className="history-card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'rgba(255,255,255,0.5)' }}>
+                    <span>{formattedDate}</span>
+                    <span>{hGame.boardSize}x{hGame.boardSize} ({hGame.winCondition} in a row)</span>
+                  </div>
+                  <div style={{ fontWeight: 600, fontSize: '0.95rem', margin: '0.3rem 0' }}>
+                    {hGame.players.map((p: any) => `${p.symbol} ${p.name}`).join(' vs ')}
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: winnerDetails ? winnerDetails.color : '#f59e0b', fontWeight: 500 }}>
+                    {hGame.isDraw ? '🤝 Draw' : `🎉 Winner: ${winnerDetails?.name}`}
+                  </div>
+                  <button 
+                    onClick={() => {
+                      handleStartReplay(hGame);
+                      setShowHistorySidebar(false);
+                    }}
+                    className="btn btn-secondary"
+                    style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem', borderRadius: '8px', width: '100%', marginTop: '0.5rem' }}
+                  >
+                    🔄 Replay Match ({hGame.moves ? hGame.moves.length : 0} moves)
+                  </button>
+                </div>
+              );
+            })
+          )}
+        </div>
+        {localHistory.length > 0 && (
+          <div style={{ padding: '1.5rem', borderTop: '1px solid rgba(255, 255, 255, 0.08)' }}>
+            <button 
+              onClick={clearHistory}
+              className="btn btn-danger"
+              style={{ width: '100%', padding: '0.7rem' }}
+            >
+              Clear History 🗑️
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Replay Overlay */}
+      {activeReplayGame && (
+        <div className="replay-overlay">
+          <div className="replay-container fade-in">
+            <button 
+              onClick={() => {
+                setActiveReplayGame(null);
+                setIsPlayingReplay(false);
+              }}
+              style={{
+                position: 'absolute',
+                top: '1.5rem',
+                right: '1.5rem',
+                background: 'transparent',
+                border: 'none',
+                color: 'rgba(255,255,255,0.6)',
+                fontSize: '1.5rem',
+                cursor: 'pointer'
+              }}
+            >
+              ✕
+            </button>
+
+            <div style={{ textAlign: 'center' }}>
+              <h2 style={{ margin: '0 0 0.5rem 0' }}>🔄 Match Replay</h2>
+              <p style={{ color: 'rgba(255,255,255,0.6)', margin: 0, fontSize: '0.9rem' }}>
+                {activeReplayGame.boardSize}x{activeReplayGame.boardSize} grid • {activeReplayGame.winCondition} in a row
+              </p>
+              <div style={{ fontSize: '1.1rem', fontWeight: 600, marginTop: '0.8rem' }}>
+                {activeReplayGame.players.map((p: any) => `${p.symbol} ${p.name}`).join(' vs ')}
+              </div>
+            </div>
+
+            {/* Replay Board */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: `repeat(${activeReplayGame.boardSize}, 1fr)`,
+                gap: '8px',
+                width: '100%',
+                maxWidth: '320px',
+                margin: '1rem auto',
+                aspectRatio: '1'
+              }}
+            >
+              {getReplayBoardState().map((cell, idx) => {
+                const isLastMove = activeReplayGame.moves[replayStep] === idx;
+                const symbolOwner = activeReplayGame.players.find((p: any) => p.symbol === cell);
+                const cellColor = symbolOwner?.color || 'transparent';
+
+                return (
+                  <div
+                    key={idx}
+                    className={isLastMove ? 'winning-cell' : ''}
+                    style={{
+                      background: isLastMove ? `${cellColor}25` : 'rgba(255, 255, 255, 0.03)',
+                      border: '1.5px solid',
+                      borderColor: isLastMove ? cellColor : 'rgba(255, 255, 255, 0.08)',
+                      borderRadius: '12px',
+                      fontSize: `${Math.max(1.2, 4 - activeReplayGame.boardSize * 0.3)}rem`,
+                      fontWeight: 'bold',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      aspectRatio: '1',
+                      userSelect: 'none',
+                      '--cell-color': cellColor,
+                      '--cell-color-glow': `${cellColor}40`
+                    } as React.CSSProperties}
+                  >
+                    {cell}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Step Description */}
+            <div style={{ 
+              textAlign: 'center', 
+              background: 'rgba(255,255,255,0.03)', 
+              padding: '0.8rem', 
+              borderRadius: '12px', 
+              fontSize: '0.95rem',
+              minHeight: '24px',
+              border: '1px solid rgba(255,255,255,0.05)'
+            }}>
+              {getReplayStepDescription()}
+            </div>
+
+            {/* Replay Controls */}
+            <div className="replay-controls">
+              <button 
+                className="replay-btn" 
+                onClick={() => {
+                  setReplayStep(-1);
+                  setIsPlayingReplay(false);
+                }} 
+                disabled={replayStep === -1}
+                title="Start"
+              >
+                ⏮
+              </button>
+              <button 
+                className="replay-btn" 
+                onClick={() => {
+                  setReplayStep(prev => prev - 1);
+                  setIsPlayingReplay(false);
+                }} 
+                disabled={replayStep === -1}
+                title="Previous Move"
+              >
+                ◀
+              </button>
+              <button 
+                className={`replay-btn ${isPlayingReplay ? 'active' : ''}`}
+                onClick={() => setIsPlayingReplay(!isPlayingReplay)}
+                disabled={!activeReplayGame.moves || activeReplayGame.moves.length === 0}
+                title={isPlayingReplay ? 'Pause' : 'Auto Play'}
+              >
+                {isPlayingReplay ? '⏸' : '▶'}
+              </button>
+              <button 
+                className="replay-btn" 
+                onClick={() => {
+                  setReplayStep(prev => prev + 1);
+                  setIsPlayingReplay(false);
+                }} 
+                disabled={!activeReplayGame.moves || replayStep === activeReplayGame.moves.length - 1}
+                title="Next Move"
+              >
+                ▶️
+              </button>
+              <button 
+                className="replay-btn" 
+                onClick={() => {
+                  setReplayStep(activeReplayGame.moves.length - 1);
+                  setIsPlayingReplay(false);
+                }} 
+                disabled={!activeReplayGame.moves || replayStep === activeReplayGame.moves.length - 1}
+                title="End"
+              >
+                ⏭
+              </button>
+            </div>
+            
+            <div style={{ textAlign: 'center', fontSize: '0.85rem', color: 'rgba(255,255,255,0.5)' }}>
+              Move {replayStep + 1} of {activeReplayGame.moves ? activeReplayGame.moves.length : 0}
+            </div>
           </div>
         </div>
       )}
