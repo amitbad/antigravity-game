@@ -13,16 +13,6 @@ interface Player {
   draws: number;
 }
 
-interface GameRecord {
-  id: string;
-  winnerId: string | null;
-  playerIds: string[];
-  isDraw: boolean;
-  boardSize: number;
-  winCondition: number;
-  date: string;
-}
-
 const PRESET_EMOJIS = ['❌', '⭕', '🚀', '🦄', '⭐', '🔥', '🎮', '🍕', '🦊', '⚡', '👑', '🍀'];
 const PRESET_COLORS = ['#ff4b4b', '#4b7bff', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#06b6d4', '#14b8a6'];
 
@@ -33,8 +23,6 @@ export default function App() {
   // Backend States
   const [allPlayers, setAllPlayers] = useState<Player[]>([]);
   const [leaderboard, setLeaderboard] = useState<Player[]>([]);
-  const [games, setGames] = useState<GameRecord[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // New Player Form State
@@ -42,6 +30,42 @@ export default function App() {
   const [newPlayerSymbol, setNewPlayerSymbol] = useState('🚀');
   const [newPlayerColor, setNewPlayerColor] = useState('#10b981');
   const [formError, setFormError] = useState<string | null>(null);
+
+  // Local Player Profile State
+  const [profile, setProfile] = useState<{
+    name: string;
+    avatar: string;
+    wins: number;
+    losses: number;
+    draws: number;
+  }>(() => {
+    const saved = localStorage.getItem('tic_tac_toe_user_profile');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {}
+    }
+    return {
+      name: 'Player 1',
+      avatar: '🚀',
+      wins: 0,
+      losses: 0,
+      draws: 0
+    };
+  });
+
+  const displayedPlayers = [
+    {
+      id: 'local-profile',
+      name: profile.name || 'Player 1',
+      symbol: profile.avatar,
+      color: '#3b82f6',
+      wins: profile.wins,
+      losses: profile.losses,
+      draws: profile.draws
+    },
+    ...allPlayers.filter(p => p.id !== 'local-profile')
+  ];
 
   // Lobby Configuration State
   const [selectedPlayerIds, setSelectedPlayerIds] = useState<string[]>([]);
@@ -59,7 +83,6 @@ export default function App() {
 
   // Load Initial Server Data
   const fetchData = async () => {
-    setLoading(true);
     setError(null);
     try {
       // Try to load from server. Fallback to local memory if server is down.
@@ -68,8 +91,8 @@ export default function App() {
         const playersData = await playersRes.json();
         setAllPlayers(playersData);
         // Pre-select first two players if available
-        if (playersData.length >= 2 && selectedPlayerIds.length === 0) {
-          setSelectedPlayerIds([playersData[0].id, playersData[1].id]);
+        if (selectedPlayerIds.length === 0) {
+          setSelectedPlayerIds(['local-profile', playersData[0]?.id].filter(Boolean));
         }
       } else {
         // Fallback fallback data
@@ -79,7 +102,7 @@ export default function App() {
         ];
         setAllPlayers(localPlayers);
         if (selectedPlayerIds.length === 0) {
-          setSelectedPlayerIds(['1', '2']);
+          setSelectedPlayerIds(['local-profile', '1']);
         }
         setError('Could not connect to backend server. Running in local fallback mode.');
       }
@@ -91,13 +114,11 @@ export default function App() {
 
       const gamesRes = await fetch(`${API_URL}/games`).catch(() => null);
       if (gamesRes && gamesRes.ok) {
-        setGames(await gamesRes.json());
+        await gamesRes.json();
       }
     } catch (err) {
       console.error(err);
       setError('An unexpected error occurred while loading server data.');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -178,7 +199,7 @@ export default function App() {
 
   // Initialize Game
   const startNewGame = () => {
-    const playersToPlay = allPlayers.filter(p => selectedPlayerIds.includes(p.id));
+    const playersToPlay = displayedPlayers.filter(p => selectedPlayerIds.includes(p.id));
     if (playersToPlay.length < 2) return;
 
     setActivePlayers(playersToPlay);
@@ -302,6 +323,29 @@ export default function App() {
     setGameSaved(true);
 
     const playerIds = activePlayers.map(p => p.id);
+
+    // Save to local storage profile if local profile is in the game
+    const hasLocalProfile = playerIds.includes('local-profile');
+    if (hasLocalProfile) {
+      setProfile(prev => {
+        let newWins = prev.wins;
+        let newLosses = prev.losses;
+        let newDraws = prev.draws;
+
+        if (draw) {
+          newDraws += 1;
+        } else if (winnerId === 'local-profile') {
+          newWins += 1;
+        } else {
+          newLosses += 1;
+        }
+
+        const updated = { ...prev, wins: newWins, losses: newLosses, draws: newDraws };
+        localStorage.setItem('tic_tac_toe_user_profile', JSON.stringify(updated));
+        return updated;
+      });
+    }
+
     try {
       const response = await fetch(`${API_URL}/games`, {
         method: 'POST',
@@ -324,7 +368,7 @@ export default function App() {
         if (leaderboardRes && leaderboardRes.ok) setLeaderboard(await leaderboardRes.json());
 
         const gamesRes = await fetch(`${API_URL}/games`).catch(() => null);
-        if (gamesRes && gamesRes.ok) setGames(await gamesRes.json());
+        if (gamesRes && gamesRes.ok) await gamesRes.json();
       }
     } catch (err) {
       console.error('Error saving game record:', err);
@@ -344,10 +388,6 @@ export default function App() {
         })
       );
     }
-  };
-
-  const getPlayerDetails = (id: string) => {
-    return allPlayers.find(p => p.id === id);
   };
 
   return (
@@ -412,7 +452,7 @@ export default function App() {
                 Select Active Players ({selectedPlayerIds.length} Selected)
               </h3>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '0.8rem' }}>
-                {allPlayers.map(p => {
+                {displayedPlayers.map(p => {
                   const isSelected = selectedPlayerIds.includes(p.id);
                   return (
                     <div
@@ -479,6 +519,92 @@ export default function App() {
 
           {/* Sidebar: Add User Form + Leaderboard */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+            {/* Player Profile Section */}
+            <div className="glass-panel" style={{ padding: '2rem' }}>
+              <h2 style={{ marginTop: 0, fontWeight: 700, fontSize: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                👤 My Profile
+              </h2>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
+                <div>
+                  <label style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.7)', display: 'block', marginBottom: '0.4rem' }}>
+                    Profile Name
+                  </label>
+                  <input
+                    type="text"
+                    value={profile.name}
+                    onChange={(e) => {
+                      const newName = e.target.value;
+                      setProfile(prev => {
+                        const updated = { ...prev, name: newName };
+                        localStorage.setItem('tic_tac_toe_user_profile', JSON.stringify(updated));
+                        return updated;
+                      });
+                    }}
+                    placeholder="Enter your name"
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.7)', display: 'block', marginBottom: '0.4rem' }}>
+                    Choose Avatar
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '0.4rem' }}>
+                    {PRESET_EMOJIS.map(emoji => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        onClick={() => {
+                          setProfile(prev => {
+                            const updated = { ...prev, avatar: emoji };
+                            localStorage.setItem('tic_tac_toe_user_profile', JSON.stringify(updated));
+                            return updated;
+                          });
+                        }}
+                        style={{
+                          background: profile.avatar === emoji ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.03)',
+                          border: '1.5px solid',
+                          borderColor: profile.avatar === emoji ? '#3b82f6' : 'rgba(255,255,255,0.08)',
+                          borderRadius: '8px',
+                          padding: '0.5rem',
+                          fontSize: '1.3rem',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s'
+                        }}
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div style={{
+                  background: 'rgba(255,255,255,0.02)',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  borderRadius: '16px',
+                  padding: '1rem',
+                  marginTop: '0.5rem'
+                }}>
+                  <div style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.5)', marginBottom: '0.5rem', textAlign: 'center' }}>
+                    🏆 Lifetime Stats (Stored Locally)
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem', textAlign: 'center' }}>
+                    <div style={{ borderRight: '1px solid rgba(255,255,255,0.08)' }}>
+                      <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#10b981' }}>{profile.wins}</div>
+                      <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)' }}>Wins</div>
+                    </div>
+                    <div style={{ borderRight: '1px solid rgba(255,255,255,0.08)' }}>
+                      <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#ef4444' }}>{profile.losses}</div>
+                      <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)' }}>Losses</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#f59e0b' }}>{profile.draws}</div>
+                      <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)' }}>Draws</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {/* Add User */}
             <div className="glass-panel" style={{ padding: '2rem' }}>
               <h2 style={{ marginTop: 0, fontWeight: 700, fontSize: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
