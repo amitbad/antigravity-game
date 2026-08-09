@@ -396,7 +396,6 @@ input:focus, select:focus {
   to { opacity: 1; transform: translateY(0); }
 }
 
-<<<<<<< HEAD
 /* Sidebar Styles */
 .history-sidebar {
   position: fixed;
