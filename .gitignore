@@ -4,3 +4,4 @@ dist/
 *.log
 **/node_modules/
 **/dist/
+server/database.json
