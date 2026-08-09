@@ -67,6 +67,29 @@ export const db = {
     return newPlayer;
   },
 
+  updatePlayer(id, name, symbol, color) {
+    const data = readDb();
+    const playerIndex = data.players.findIndex(p => p.id === id);
+    if (playerIndex === -1) throw new Error('Player not found.');
+
+    // Check if another player has the same name or symbol
+    const duplicateName = data.players.find(p => p.id !== id && p.name.toLowerCase() === name.toLowerCase());
+    const duplicateSymbol = data.players.find(p => p.id !== id && p.symbol === symbol);
+
+    if (duplicateName) throw new Error('A player with this name already exists.');
+    if (duplicateSymbol) throw new Error('This symbol is already taken.');
+
+    data.players[playerIndex] = {
+      ...data.players[playerIndex],
+      name,
+      symbol,
+      color
+    };
+
+    writeDb(data);
+    return data.players[playerIndex];
+  },
+
   addGame(winnerId, playerIds, isDraw, boardSize, winCondition) {
     const data = readDb();
     const game = {

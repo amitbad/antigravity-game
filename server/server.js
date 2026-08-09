@@ -34,6 +34,21 @@ app.post('/api/players', (req, res) => {
   }
 });
 
+// Update player
+app.put('/api/players/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, symbol, color } = req.body;
+    if (!name || !symbol || !color) {
+      return res.status(400).json({ error: 'Name, symbol, and color are required.' });
+    }
+    const player = db.updatePlayer(id, name, symbol, color);
+    res.json(player);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
 // Get leaderboard
 app.get('/api/leaderboard', (req, res) => {
   try {

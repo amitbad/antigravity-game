@@ -13,15 +13,7 @@ interface Player {
   draws: number;
 }
 
-interface GameRecord {
-  id: string;
-  winnerId: string | null;
-  playerIds: string[];
-  isDraw: boolean;
-  boardSize: number;
-  winCondition: number;
-  date: string;
-}
+
 
 const PRESET_EMOJIS = ['❌', '⭕', '🚀', '🦄', '⭐', '🔥', '🎮', '🍕', '🦊', '⚡', '👑', '🍀'];
 const PRESET_COLORS = ['#ff4b4b', '#4b7bff', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#06b6d4', '#14b8a6'];
@@ -30,11 +22,13 @@ export default function App() {
   // Views: 'lobby' | 'game' | 'leaderboard'
   const [view, setView] = useState<'lobby' | 'game'>('lobby');
 
+  // Customization States
+  const [theme, setTheme] = useState<'neon' | 'cyberpunk' | 'forest' | 'retro' | 'pastel' | 'glass'>('neon');
+  const [isCustomizationOpen, setIsCustomizationOpen] = useState(false);
+
   // Backend States
   const [allPlayers, setAllPlayers] = useState<Player[]>([]);
   const [leaderboard, setLeaderboard] = useState<Player[]>([]);
-  const [games, setGames] = useState<GameRecord[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // New Player Form State
@@ -59,7 +53,6 @@ export default function App() {
 
   // Load Initial Server Data
   const fetchData = async () => {
-    setLoading(true);
     setError(null);
     try {
       // Try to load from server. Fallback to local memory if server is down.
@@ -88,16 +81,9 @@ export default function App() {
       if (leaderboardRes && leaderboardRes.ok) {
         setLeaderboard(await leaderboardRes.json());
       }
-
-      const gamesRes = await fetch(`${API_URL}/games`).catch(() => null);
-      if (gamesRes && gamesRes.ok) {
-        setGames(await gamesRes.json());
-      }
     } catch (err) {
       console.error(err);
       setError('An unexpected error occurred while loading server data.');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -322,9 +308,6 @@ export default function App() {
         
         const leaderboardRes = await fetch(`${API_URL}/leaderboard`).catch(() => null);
         if (leaderboardRes && leaderboardRes.ok) setLeaderboard(await leaderboardRes.json());
-
-        const gamesRes = await fetch(`${API_URL}/games`).catch(() => null);
-        if (gamesRes && gamesRes.ok) setGames(await gamesRes.json());
       }
     } catch (err) {
       console.error('Error saving game record:', err);
@@ -346,12 +329,35 @@ export default function App() {
     }
   };
 
-  const getPlayerDetails = (id: string) => {
-    return allPlayers.find(p => p.id === id);
+
+  const handleUpdatePlayer = async (id: string, name: string, symbol: string, color: string) => {
+    try {
+      const response = await fetch(`${API_URL}/players/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, symbol, color })
+      });
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || 'Failed to update player.');
+      }
+      const updated = await response.json();
+      setAllPlayers(prev => prev.map(p => p.id === id ? updated : p));
+      
+      // Update leaderboard
+      const leaderboardRes = await fetch(`${API_URL}/leaderboard`).catch(() => null);
+      if (leaderboardRes && leaderboardRes.ok) {
+        setLeaderboard(await leaderboardRes.json());
+      }
+    } catch (err: any) {
+      // Local fallback
+      setAllPlayers(prev => prev.map(p => p.id === id ? { ...p, name, symbol, color } : p));
+    }
   };
 
   return (
-    <div className="fade-in">
+    <div className="theme-container" data-theme={theme}>
+      <div style={{ width: '100%', maxWidth: '1200px' }}>
       <header style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
         <h1 className="title-gradient" style={{ fontSize: '3rem', margin: '0 0 0.5rem 0' }}>
           Neon Tic-Tac-Toe
@@ -379,7 +385,16 @@ export default function App() {
         <div className="app-container">
           {/* Setup / Lobby controls */}
           <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-            <h2 style={{ marginTop: 0, fontWeight: 700, fontSize: '1.6rem' }}>🎮 Game Setup</h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2 style={{ margin: 0, fontWeight: 700, fontSize: '1.6rem' }}>🎮 Game Setup</h2>
+              <button
+                onClick={() => setIsCustomizationOpen(true)}
+                className="btn btn-secondary"
+                style={{ padding: '0.6rem 1.2rem', fontSize: '0.9rem' }}
+              >
+                🎨 Theme & Customization
+              </button>
+            </div>
 
             {/* Board configs */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
@@ -705,6 +720,175 @@ export default function App() {
               );
             })}
           </div>
+        </div>
+      )}
+
+      {/* Customization Modal */}
+      {isCustomizationOpen && (
+        <div className="modal-overlay" onClick={() => setIsCustomizationOpen(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>🎨 Match Customization</h2>
+              <button className="close-btn" onClick={() => setIsCustomizationOpen(false)}>×</button>
+            </div>
+
+            <h3 style={{ marginTop: 0, marginBottom: '0.8rem' }}>Select Board Theme</h3>
+            <div className="themes-grid">
+              {[
+                { id: 'neon', name: 'Neon Classic', bg: 'radial-gradient(circle, #1e3a8a, #0b0f19)', text: '#00c6ff', border: '#0072ff' },
+                { id: 'cyberpunk', name: 'Cyberpunk Grid', bg: 'linear-gradient(135deg, #0d0116, #120221)', text: '#00ffff', border: '#ff007f' },
+                { id: 'forest', name: 'Forest Emerald', bg: '#091a10', text: '#ecfdf5', border: '#10b981' },
+                { id: 'retro', name: 'Retro Terminal', bg: '#000000', text: '#33ff33', border: '#33ff33' },
+                { id: 'pastel', name: 'Pastel Dream', bg: '#fef2f2', text: '#1e1b4b', border: '#6366f1' },
+                { id: 'glass', name: 'Glass Slate', bg: 'rgba(255,255,255,0.03)', text: '#f9fafb', border: 'rgba(255,255,255,0.15)' }
+              ].map(t => (
+                <div
+                  key={t.id}
+                  className={`theme-card ${theme === t.id ? 'active' : ''}`}
+                  onClick={() => setTheme(t.id as any)}
+                >
+                  <div className="theme-preview-box" style={{ background: t.bg, color: t.text, border: `1px solid ${t.border}` }}>
+                    {t.id === 'retro' ? 'SYS> X / O' : '🏆 PLAY'}
+                  </div>
+                  <span className="theme-card-title">{t.name}</span>
+                </div>
+              ))}
+            </div>
+
+            <h3 style={{ marginBottom: '0.8rem' }}>Customize Active Players</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
+              <PlayerEditSubform
+                player={allPlayers.find(p => p.id === selectedPlayerIds[0]) || allPlayers[0]}
+                otherPlayer={allPlayers.find(p => p.id === selectedPlayerIds[1]) || allPlayers[1]}
+                onUpdate={handleUpdatePlayer}
+                label="Player 1"
+              />
+              <PlayerEditSubform
+                player={allPlayers.find(p => p.id === selectedPlayerIds[1]) || allPlayers[1]}
+                otherPlayer={allPlayers.find(p => p.id === selectedPlayerIds[0]) || allPlayers[0]}
+                onUpdate={handleUpdatePlayer}
+                label="Player 2"
+              />
+            </div>
+
+            <button className="btn" style={{ width: '100%', padding: '1rem' }} onClick={() => setIsCustomizationOpen(false)}>
+              Save & Apply Configuration ✓
+            </button>
+          </div>
+        </div>
+      )}
+      </div>
+    </div>
+  );
+}
+
+// Sub-component for editing individual player configurations in the modal
+interface PlayerEditSubformProps {
+  player?: Player;
+  otherPlayer?: Player;
+  onUpdate: (id: string, name: string, symbol: string, color: string) => void;
+  label: string;
+}
+
+function PlayerEditSubform({ player, otherPlayer, onUpdate, label }: PlayerEditSubformProps) {
+  if (!player) return null;
+
+  const [name, setName] = useState(player.name);
+  const [symbol, setSymbol] = useState(player.symbol);
+  const [color, setColor] = useState(player.color);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setName(player.name);
+    setSymbol(player.symbol);
+    setColor(player.color);
+  }, [player]);
+
+  const handleChangeName = (val: string) => {
+    setName(val);
+    setError(null);
+    if (otherPlayer && val.trim().toLowerCase() === otherPlayer.name.toLowerCase()) {
+      setError('Cannot have the same name as the other player.');
+      return;
+    }
+    onUpdate(player.id, val.trim(), symbol, color);
+  };
+
+  const handleChangeSymbol = (emoji: string) => {
+    setSymbol(emoji);
+    setError(null);
+    if (otherPlayer && emoji === otherPlayer.symbol) {
+      setError('Symbol already selected by the other player.');
+      return;
+    }
+    onUpdate(player.id, name, emoji, color);
+  };
+
+  const handleChangeColor = (col: string) => {
+    setColor(col);
+    onUpdate(player.id, name, symbol, col);
+  };
+
+  const ALL_CUSTOM_EMOJIS = ['❌', '⭕', '🚀', '🦄', '⭐', '🔥', '🎮', '🍕', '🦊', '⚡', '👑', '🍀', '💀', '👻', '👽', '👾', '🍩', '🥑', '🎈', '💎', '💡', '🔮', '🐱', '🐶', '🦖', '🍎', '🛹', '🎨', '🌈'];
+
+  return (
+    <div style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid rgba(255, 255, 255, 0.05)', padding: '1.2rem', borderRadius: '16px' }}>
+      <div style={{ fontWeight: 700, marginBottom: '0.8rem', color: color, textTransform: 'uppercase', fontSize: '0.85rem', letterSpacing: '0.05em' }}>
+        {label} Config
+      </div>
+
+      <div style={{ marginBottom: '1rem' }}>
+        <label style={{ fontSize: '0.8rem', opacity: 0.7, display: 'block', marginBottom: '0.3rem' }}>Name</label>
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => handleChangeName(e.target.value)}
+          placeholder="Player Name"
+        />
+      </div>
+
+      <div style={{ marginBottom: '1rem' }}>
+        <label style={{ fontSize: '0.8rem', opacity: 0.7, display: 'block', marginBottom: '0.3rem' }}>Choose Icon/Emoji</label>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '0.3rem', maxHeight: '100px', overflowY: 'auto', padding: '0.2rem', background: 'rgba(0,0,0,0.2)', borderRadius: '8px' }}>
+          {ALL_CUSTOM_EMOJIS.map(emoji => (
+            <button
+              key={emoji}
+              type="button"
+              onClick={() => handleChangeSymbol(emoji)}
+              style={{
+                background: symbol === emoji ? `${color}30` : 'transparent',
+                border: '1px solid',
+                borderColor: symbol === emoji ? color : 'transparent',
+                borderRadius: '6px',
+                padding: '0.3rem',
+                fontSize: '1.2rem',
+                cursor: 'pointer',
+                transition: 'all 0.15s'
+              }}
+            >
+              {emoji}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <label style={{ fontSize: '0.8rem', opacity: 0.7, display: 'block', marginBottom: '0.3rem' }}>Color Theme</label>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+          {PRESET_COLORS.map(col => (
+            <div
+              key={col}
+              onClick={() => handleChangeColor(col)}
+              className={`color-dot ${color === col ? 'selected' : ''}`}
+              style={{ backgroundColor: col, width: '24px', height: '24px' }}
+            />
+          ))}
+        </div>
+      </div>
+
+      {error && (
+        <div style={{ color: '#ef4444', fontSize: '0.75rem', marginTop: '0.5rem' }}>
+          ⚠️ {error}
         </div>
       )}
     </div>
