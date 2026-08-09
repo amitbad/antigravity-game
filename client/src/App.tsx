@@ -36,6 +36,7 @@ export default function App() {
   // const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+
   // New Player Form State
   const [newPlayerName, setNewPlayerName] = useState('');
   const [newPlayerSymbol, setNewPlayerSymbol] = useState('🚀');
@@ -82,6 +83,8 @@ export default function App() {
   const [selectedPlayerIds, setSelectedPlayerIds] = useState<string[]>([]);
   const [boardSize, setBoardSize] = useState(3);
   const [winCondition, setWinCondition] = useState(3);
+  const [timerEnabled, setTimerEnabled] = useState(false);
+  const [turnLimitSeconds, setTurnLimitSeconds] = useState(15);
 
   // Active Game State
   const [activePlayers, setActivePlayers] = useState<Player[]>([]);
@@ -91,6 +94,9 @@ export default function App() {
   const [winningCells, setWinningCells] = useState<number[]>([]);
   const [isDraw, setIsDraw] = useState(false);
   const [gameSaved, setGameSaved] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(15);
+  const [forfeitMessage, setForfeitMessage] = useState<string | null>(null);
+
 
   // Local History and Replay State
   const [moves, setMoves] = useState<number[]>([]);
@@ -187,6 +193,27 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boardSize]);
 
+  // Turn Timer countdown effect
+  useEffect(() => {
+    if (!timerEnabled || view !== 'game' || winner || isDraw) return;
+
+    const timer = setInterval(() => {
+      setTimeLeft(prev => {
+        if (prev <= 1) {
+          // Timeout occurred: forfeit turn
+          const activePlayer = activePlayers[turnIndex];
+          setForfeitMessage(`⚠️ Time's up! ${activePlayer ? activePlayer.name : 'Player'}'s turn was forfeited.`);
+          setTurnIndex(current => (current + 1) % activePlayers.length);
+          return turnLimitSeconds;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [timerEnabled, view, turnIndex, winner, isDraw, activePlayers, turnLimitSeconds]);
+
+
   // Handle Add Player API
   const handleAddPlayer = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -264,8 +291,11 @@ export default function App() {
     setIsDraw(false);
     setGameSaved(false);
     setMoves([]);
+    setTimeLeft(turnLimitSeconds);
+    setForfeitMessage(null);
     setView('game');
   };
+
 
   // Check Game Over Winner logic
   const checkWinner = (grid: (string | null)[], size: number, target: number) => {
@@ -372,6 +402,8 @@ export default function App() {
     }
 
     // Next player turn
+    setTimeLeft(turnLimitSeconds);
+    setForfeitMessage(null);
     setTurnIndex((turnIndex + 1) % activePlayers.length);
   };
 
@@ -507,8 +539,6 @@ export default function App() {
       setLocalHistory([]);
     }
   };
-
->>>>>>> add_game_history_sidebar
   return (
     <div className="fade-in">
       <header style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
@@ -573,6 +603,34 @@ export default function App() {
                 </select>
               </div>
             </div>
+
+            {/* Timer configs */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', alignItems: 'center' }}>
+              <div className="timer-toggle-wrapper">
+                <input
+                  id="timer-toggle"
+                  type="checkbox"
+                  checked={timerEnabled}
+                  onChange={(e) => setTimerEnabled(e.target.checked)}
+                  style={{ width: 'auto', cursor: 'pointer' }}
+                />
+                <label htmlFor="timer-toggle">Enable Turn Timer</label>
+              </div>
+
+              {timerEnabled && (
+                <div>
+                  <label style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.7)', display: 'block', marginBottom: '0.5rem' }}>
+                    Timer Duration
+                  </label>
+                  <select value={turnLimitSeconds} onChange={(e) => setTurnLimitSeconds(Number(e.target.value))}>
+                    {[5, 10, 15, 30, 60].map(sec => (
+                      <option key={sec} value={sec}>{sec} seconds</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+
 
             {/* Selected Players list */}
             <div>
@@ -855,24 +913,48 @@ export default function App() {
             </div>
           </div>
 
+          {/* Forfeit Notification Banner */}
+          {forfeitMessage && (
+            <div className="forfeit-banner">
+              {forfeitMessage}
+            </div>
+          )}
+
           {/* Turn Indicator / Game status */}
           <div style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
             {!winner && !isDraw ? (
-              <div
-                className="player-badge active"
-                style={{
-                  display: 'inline-flex',
-                  '--player-color': activePlayers[turnIndex].color,
-                  '--player-color-glow': `${activePlayers[turnIndex].color}25`
-                } as React.CSSProperties}
-              >
-                <span style={{ fontSize: '2rem' }}>{activePlayers[turnIndex].symbol}</span>
-                <div style={{ textAlign: 'left' }}>
-                  <div style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase' }}>Current Turn</div>
-                  <div style={{ fontSize: '1.3rem', fontWeight: 700, color: activePlayers[turnIndex].color }}>
-                    {activePlayers[turnIndex].name}
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <div
+                  className="player-badge active"
+                  style={{
+                    display: 'inline-flex',
+                    '--player-color': activePlayers[turnIndex].color,
+                    '--player-color-glow': `${activePlayers[turnIndex].color}25`
+                  } as React.CSSProperties}
+                >
+                  <span style={{ fontSize: '2rem' }}>{activePlayers[turnIndex].symbol}</span>
+                  <div style={{ textAlign: 'left' }}>
+                    <div style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase' }}>Current Turn</div>
+                    <div style={{ fontSize: '1.3rem', fontWeight: 700, color: activePlayers[turnIndex].color }}>
+                      {activePlayers[turnIndex].name}
+                    </div>
                   </div>
                 </div>
+
+                {/* Turn Timer Visual Indicator */}
+                {timerEnabled && (
+                  <div className="timer-container">
+                    <div className="timer-bar-bg">
+                      <div
+                        className={`timer-bar-fill ${timeLeft <= 3 ? 'danger' : timeLeft <= 6 ? 'warning' : ''}`}
+                        style={{ width: `${(timeLeft / turnLimitSeconds) * 100}%` }}
+                      />
+                    </div>
+                    <div className={`timer-text ${timeLeft <= 3 ? 'danger' : ''}`}>
+                      {timeLeft}s
+                    </div>
+                  </div>
+                )}
               </div>
             ) : winner ? (
               <div className="fade-in" style={{ display: 'inline-block' }}>
