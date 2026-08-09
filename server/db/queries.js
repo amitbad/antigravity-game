@@ -30,6 +30,8 @@ dbConn.exec(`
     is_draw INTEGER DEFAULT 0,
     board_size INTEGER NOT NULL,
     win_condition INTEGER NOT NULL,
+    move_count INTEGER DEFAULT 0,
+    moves TEXT,
     date TEXT NOT NULL,
     FOREIGN KEY(winner_id) REFERENCES players(id)
   );
@@ -85,20 +87,21 @@ export function addPlayer(name, symbol, color) {
   };
 }
 
-export function addGame(winnerId, playerIds, isDraw, boardSize, winCondition) {
+export function addGame(winnerId, playerIds, isDraw, boardSize, winCondition, moveCount = 0, moves = []) {
   const id = Date.now().toString();
   const date = new Date().toISOString();
 
   // SQLite boolean mapping: isDraw -> 1 or 0
   const isDrawVal = isDraw ? 1 : 0;
+  const movesStr = JSON.stringify(moves);
 
   const insertGame = dbConn.prepare(
-    'INSERT INTO games (id, winner_id, is_draw, board_size, win_condition, date) VALUES (?, ?, ?, ?, ?, ?)'
+    'INSERT INTO games (id, winner_id, is_draw, board_size, win_condition, move_count, moves, date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
   );
   const insertGamePlayer = dbConn.prepare('INSERT INTO game_players (game_id, player_id) VALUES (?, ?)');
 
   const updatePlayerStats = dbConn.transaction(() => {
-    insertGame.run(id, winnerId, isDrawVal, boardSize, winCondition, date);
+    insertGame.run(id, winnerId, isDrawVal, boardSize, winCondition, moveCount, movesStr, date);
     for (const pId of playerIds) {
       insertGamePlayer.run(id, pId);
 
@@ -122,6 +125,8 @@ export function addGame(winnerId, playerIds, isDraw, boardSize, winCondition) {
     isDraw,
     boardSize,
     winCondition,
+    moveCount,
+    moves,
     date
   };
 }
@@ -139,15 +144,25 @@ export function getGames() {
     playersByGame[gp.game_id].push(gp.player_id);
   }
 
-  return games.map(g => ({
-    id: g.id,
-    winnerId: g.winner_id,
-    playerIds: playersByGame[g.id] || [],
-    isDraw: g.is_draw === 1,
-    boardSize: g.board_size,
-    winCondition: g.win_condition,
-    date: g.date
-  }));
+  return games.map(g => {
+    let movesParsed = [];
+    try {
+      movesParsed = g.moves ? JSON.parse(g.moves) : [];
+    } catch (e) {
+      console.error(e);
+    }
+    return {
+      id: g.id,
+      winnerId: g.winner_id,
+      playerIds: playersByGame[g.id] || [],
+      isDraw: g.is_draw === 1,
+      boardSize: g.board_size,
+      winCondition: g.win_condition,
+      moveCount: g.move_count || 0,
+      moves: movesParsed,
+      date: g.date
+    };
+  });
 }
 
 export function getLeaderboard() {
@@ -163,10 +178,27 @@ export function getLeaderboard() {
   }).sort((a, b) => b.wins - a.wins || b.winRate - a.winRate);
 }
 
+export function updatePlayer(id, name, symbol, color) {
+  // Check if another player has the same name or symbol
+  const duplicateName = dbConn.prepare('SELECT id FROM players WHERE id != ? AND LOWER(name) = LOWER(?)').get(id, name);
+  if (duplicateName) {
+    throw new Error('A player with this name already exists.');
+  }
+
+  const duplicateSymbol = dbConn.prepare('SELECT id FROM players WHERE id != ? AND symbol = ?').get(id, symbol);
+  if (duplicateSymbol) {
+    throw new Error('This symbol is already taken.');
+  }
+
+  dbConn.prepare('UPDATE players SET name = ?, symbol = ?, color = ? WHERE id = ?').run(name, symbol, color, id);
+  return dbConn.prepare('SELECT * FROM players WHERE id = ?').get(id);
+}
+
 // Export the db object compatible with existing interface
 export const db = {
   getPlayers,
   addPlayer,
+  updatePlayer,
   addGame,
   getGames,
   getLeaderboard

@@ -34,6 +34,21 @@ app.post('/api/players', (req, res) => {
   }
 });
 
+// Update player
+app.put('/api/players/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, symbol, color } = req.body;
+    if (!name || !symbol || !color) {
+      return res.status(400).json({ error: 'Name, symbol, and color are required.' });
+    }
+    const player = db.updatePlayer(id, name, symbol, color);
+    res.json(player);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
 // Get leaderboard
 app.get('/api/leaderboard', (req, res) => {
   try {
@@ -47,14 +62,14 @@ app.get('/api/leaderboard', (req, res) => {
 // Record a game
 app.post('/api/games', (req, res) => {
   try {
-    const { winnerId, playerIds, isDraw, boardSize, winCondition } = req.body;
+    const { winnerId, playerIds, isDraw, boardSize, winCondition, moveCount, moves } = req.body;
     if (!playerIds || !Array.isArray(playerIds) || playerIds.length < 2) {
       return res.status(400).json({ error: 'At least 2 players are required for a game.' });
     }
     if (boardSize === undefined || winCondition === undefined) {
       return res.status(400).json({ error: 'Board size and win condition are required.' });
     }
-    const game = db.addGame(winnerId, playerIds, isDraw, boardSize, winCondition);
+    const game = db.addGame(winnerId, playerIds, isDraw, boardSize, winCondition, moveCount || 0, moves || []);
     res.status(201).json(game);
   } catch (error) {
     res.status(400).json({ error: error.message });
